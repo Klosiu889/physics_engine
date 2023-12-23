@@ -6,9 +6,82 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
+use wgpu::util::DeviceExt;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    position: [f32; 3],
+    color: [f32; 3],
+}
+
+impl Vertex {
+    const ATTRIBS: [wgpu::VertexAttribute; 2] = 
+        wgpu::vertex_attr_array![
+            0 => Float32x3,
+            1 => Float32x3
+        ];
+    fn desc() -> wgpu::VertexBufferLayout<'static> {
+        use std::mem;        
+
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBS,
+        }
+    }
+}
+
+const VERTICES: &[Vertex] = &[
+    Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [1.0, 0.0, 0.0] },
+    Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.5, 0.5, 0.0] },  
+    Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.0, 1.0, 0.0] },
+    Vertex { position: [0.35966998, -0.3473291, 0.0], color: [0.0, 0.5, 0.5] },
+    Vertex { position: [0.44147372, 0.2347359, 0.0], color: [0.0, 0.0, 1.0] },
+
+    // second figure
+    Vertex { position: [-0.4, 0.6, 0.0], color: [0.5, 0.0, 0.5] }, // A - 5
+    Vertex { position: [-0.4, -0.8, 0.0], color: [0.5, 0.0, 0.5] }, // B - 6
+    Vertex { position: [-0.2, -0.8, 0.0], color: [0.5, 0.0, 0.5] }, // C - 7
+    Vertex { position: [-0.2, 0.0, 0.0], color: [0.5, 0.0, 0.5] }, // D - 8
+    Vertex { position: [0.2, -0.8, 0.0], color: [0.5, 0.0, 0.5] }, // E - 9
+    Vertex { position: [0.4, -0.8, 0.0], color: [0.5, 0.0, 0.5] }, // F - 10
+    Vertex { position: [0.0, 0.0, 0.0], color: [0.5, 0.0, 0.5] }, // G - 11
+    Vertex { position: [-0.2, 0.4, 0.0], color: [0.5, 0.0, 0.5] }, // H - 12
+    Vertex { position: [0.0, 0.4, 0.0], color: [0.5, 0.0, 0.5] }, // I - 13
+    Vertex { position: [0.2, 0.3, 0.0], color: [0.5, 0.0, 0.5] }, // J - 14
+    Vertex { position: [0.2, 0.1, 0.0], color: [0.5, 0.0, 0.5] }, // K - 15
+    Vertex { position: [0.2, 0.6, 0.0], color: [0.5, 0.0, 0.5] }, // L - 16
+    Vertex { position: [0.4, 0.4, 0.0], color: [0.5, 0.0, 0.5] }, // M - 17
+    Vertex { position: [-0.2, -0.2, 0.0], color: [0.5, 0.0, 0.5] }, // N - 18
+    Vertex { position: [0.0, -0.2, 0.0], color: [0.5, 0.0, 0.5] }, // O - 19
+    Vertex { position: [0.2, -0.2, 0.0], color: [0.5, 0.0, 0.5] }, // P - 20
+    Vertex { position: [0.4, 0.0, 0.0], color: [0.5, 0.0, 0.5] }, // Q - 21
+    Vertex { position: [-0.2, 0.6, 0.0], color: [0.5, 0.0, 0.5] }, // R - 22
+];
+
+const INDICES: &[u16] = &[
+    0, 1, 4,
+    1, 2, 4,
+    2, 3, 4,
+
+    //second figure
+    22, 5, 6,
+    22, 6, 7,
+    22, 12, 17,
+    22, 17, 16,
+    17, 13, 14,
+    17, 14, 15,
+    17, 15, 21,
+    21, 15, 11,
+    21, 8, 18,
+    21, 18, 20,
+    18, 9, 10,
+    18, 10, 19,
+];
 
 struct State {
     surface: wgpu::Surface,
@@ -20,6 +93,9 @@ struct State {
     window: Window,
     render_pipeline_array: [wgpu::RenderPipeline; 2],
     pipeline_toggle: usize,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    indecies_ranges_array: [std::ops::Range<u32>; 2],
 }
 
 impl State {
@@ -97,7 +173,9 @@ impl State {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[],
+                buffers: &[
+                    Vertex::desc()
+                ],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -127,22 +205,24 @@ impl State {
             multiview: None,
         });
 
-        let shader_challenge = device.create_shader_module(wgpu::include_wgsl!("shader2.wgsl"));
+        let shader_challenge = shader; 
 
         let render_pipeline_layout_challenge =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
+                label: Some("Render Pipeline Layout Challenge"),
                 bind_group_layouts: &[],
                 push_constant_ranges: &[],
             });
 
         let render_pipeline_challenge = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
+            label: Some("Render Pipeline Challenge"),
             layout: Some(&render_pipeline_layout_challenge),
             vertex: wgpu::VertexState {
                 module: &shader_challenge,
                 entry_point: "vs_main",
-                buffers: &[],
+                buffers: &[
+                    Vertex::desc()
+                ],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader_challenge,
@@ -176,6 +256,24 @@ impl State {
 
         let pipeline_toggle = 0;
 
+        let vertex_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Vertex Buffer"),
+                contents: bytemuck::cast_slice(VERTICES),
+                usage: wgpu::BufferUsages::VERTEX,
+            }
+        );
+
+        let index_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Index Buffer"),
+                contents: bytemuck::cast_slice(INDICES),
+                usage: wgpu::BufferUsages::INDEX,
+            }
+        );
+
+        let indecies_ranges_array = [0..9, 9..INDICES.len() as u32];
+        
         Self {
             surface,
             device,
@@ -186,6 +284,9 @@ impl State {
             window,
             render_pipeline_array,
             pipeline_toggle,
+            vertex_buffer,
+            index_buffer,
+            indecies_ranges_array,
         }
     }
 
@@ -264,8 +365,12 @@ impl State {
             });
 
             let render_pipeline = &self.render_pipeline_array[self.pipeline_toggle];
+            let indecies_range = &self.indecies_ranges_array[self.pipeline_toggle];
+
             render_pass.set_pipeline(render_pipeline);
-            render_pass.draw(0..3, 0..1);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.draw_indexed(indecies_range.clone(), 0, 0..1);
         }
 
         self.queue.submit(iter::once(encoder.finish()));
