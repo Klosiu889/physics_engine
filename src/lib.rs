@@ -14,86 +14,7 @@ use wasm_bindgen::prelude::*;
 
 mod texture;
 mod camera;
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex {
-    position: [f32; 3],
-    tex_coords: [f32; 2],
-}
-
-impl Vertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 2] = 
-        wgpu::vertex_attr_array![
-            0 => Float32x3,
-            1 => Float32x2
-        ];
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        use std::mem;        
-
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRIBS,
-        }
-    }
-}
-
-const VERTICES: &[Vertex] = &[
-    Vertex { position: [-0.0868241, 0.49240386, 0.0], tex_coords: [0.4131759, 0.00759614], }, // A
-    Vertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 0.43041354], }, // B
-    Vertex { position: [-0.21918549, -0.44939706, 0.0], tex_coords: [0.28081453, 0.949397], }, // C
-    Vertex { position: [0.35966998, -0.3473291, 0.0], tex_coords: [0.85967, 0.84732914], }, // D
-    Vertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 0.2652641], }, // E
-];
-
-const INDICES: &[u16] = &[
-    0, 1, 4,
-    1, 2, 4,
-    2, 3, 4,
-];
-
-struct Instance {
-    position: cgmath::Vector3<f32>,
-    rotation: cgmath::Quaternion<f32>,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstanceRaw {
-    model: [[f32; 4]; 4],
-}
-
-impl Instance {
-    fn to_raw(&self) -> InstanceRaw {
-        InstanceRaw {
-            model: (cgmath::Matrix4::from_translation(self.position) * cgmath::Matrix4::from(self.rotation)).into(),
-        }
-    }
-}
-
-const NUM_INSTANCES_PER_ROW: u32 = 10;
-const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(NUM_INSTANCES_PER_ROW as f32 * 0.5, 0.0, NUM_INSTANCES_PER_ROW as f32 * 0.5);
-const ROTATION_SPEED: f32 = 2.0 * std::f32::consts::PI / 60.0;
-
-impl InstanceRaw {
-    const ATTRIBS: [wgpu::VertexAttribute; 4] =
-        wgpu::vertex_attr_array![
-            5 => Float32x4,
-            6 => Float32x4,
-            7 => Float32x4,
-            8 => Float32x4,
-        ];
-
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        use std::mem;
-        wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &Self::ATTRIBS,
-        }
-    }
-}
+mod objects;
 
 struct State {
     surface: wgpu::Surface,
@@ -114,7 +35,7 @@ struct State {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     camera_controller: camera::CameraController,
-    instances: Vec<Instance>,
+    instances: Vec<objects::Instance>,
     instance_buffer: wgpu::Buffer,
 }
 
@@ -294,9 +215,9 @@ impl State {
         });
 
         let camera_controller = camera::CameraController::new(0.2);
-        let instances = (0..NUM_INSTANCES_PER_ROW).flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                let position = cgmath::Vector3 { x: x as f32, y: 0.0, z: z as f32 } - INSTANCE_DISPLACEMENT;
+        let instances = (0..objects::NUM_INSTANCES_PER_ROW).flat_map(|z| {
+                (0..objects::NUM_INSTANCES_PER_ROW).map(move |x| {
+                let position = cgmath::Vector3 { x: x as f32, y: 0.0, z: z as f32 } - objects::INSTANCE_DISPLACEMENT;
 
                 let rotation = if position.is_zero() {
                     cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
@@ -304,13 +225,13 @@ impl State {
                     cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
                 };
 
-                Instance {
+                objects::Instance {
                     position, rotation,
                 }
             })
         }).collect::<Vec<_>>();
 
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance_data = instances.iter().map(objects::Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Instance Buffer"),
@@ -338,8 +259,8 @@ impl State {
                 module: &shader,
                 entry_point: "vs_main",
                 buffers: &[
-                    Vertex::desc(),
-                    InstanceRaw::desc(),
+                    objects::Vertex::desc(),
+                    objects::InstanceRaw::desc(),
                 ],
             },
             fragment: Some(wgpu::FragmentState {
@@ -373,7 +294,7 @@ impl State {
         let vertex_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(VERTICES),
+                contents: bytemuck::cast_slice(objects::VERTICES),
                 usage: wgpu::BufferUsages::VERTEX,
             }
         );
@@ -381,12 +302,12 @@ impl State {
         let index_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Index Buffer"),
-                contents: bytemuck::cast_slice(INDICES),
+                contents: bytemuck::cast_slice(objects::INDICES),
                 usage: wgpu::BufferUsages::INDEX,
             }
         );
 
-        let num_indices = INDICES.len() as u32;
+        let num_indices = objects::INDICES.len() as u32;
         
         Self {
             surface,
@@ -466,7 +387,7 @@ impl State {
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
 
         for instance in &mut self.instances {
-            let amount = cgmath::Quaternion::from_angle_y(cgmath::Rad(ROTATION_SPEED));
+            let amount = cgmath::Quaternion::from_angle_y(cgmath::Rad(objects::ROTATION_SPEED));
             let current = instance.rotation;
         
             instance.rotation = amount * current;
@@ -474,7 +395,7 @@ impl State {
 
         let instance_data = self.instances
             .iter()
-            .map(Instance::to_raw)
+            .map(objects::Instance::to_raw)
             .collect::<Vec<_>>();
         self.queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instance_data));
     }
