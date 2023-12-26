@@ -30,6 +30,7 @@ struct State {
     num_indices: u32,
     texture_bind_groups_array: [wgpu::BindGroup; 2],
     texture_toggle: usize,
+    depth_texture: texture::Texture,
     camera: camera::Camera,
     camera_uniform: camera::CameraUniform,
     camera_buffer: wgpu::Buffer,
@@ -165,7 +166,9 @@ impl State {
         let texture_bind_groups_array = [diffuse_bind_group, cartoon_bind_group];
 
         let texture_toggle = 0;
- 
+
+        let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
+        
         let camera = camera::Camera::new(
                 (0.0, 1.0, 2.0).into(),
                 (0.0, 0.0, 0.0).into(),
@@ -281,8 +284,13 @@ impl State {
                 unclipped_depth: false,
                 conservative: false,
             },
-            
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),            
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -323,6 +331,7 @@ impl State {
             num_indices,
             texture_bind_groups_array,
             texture_toggle,
+            depth_texture,
             camera,
             camera_uniform,
             camera_buffer,
@@ -343,6 +352,7 @@ impl State {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+            self.depth_texture = texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
         }
     }
 
@@ -353,19 +363,6 @@ impl State {
         }
 
         match event {
-            WindowEvent::CursorMoved { position, .. } => {
-                let red = position.x as f64 / self.size.width as f64;
-                let green = position.y as f64 / self.size.height as f64;
-                
-                self.clear_color = wgpu::Color {
-                    r: red,
-                    g: green,
-                    b: 0.3,
-                    a: 1.0,
-                };    
-                
-                return true;
-            },
             WindowEvent::KeyboardInput {
                 input: KeyboardInput {
                     state: ElementState::Pressed,
@@ -385,19 +382,6 @@ impl State {
         self.camera_controller.update_camera(&mut self.camera);
         self.camera_uniform.update_view_proj(&self.camera);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
-
-        for instance in &mut self.instances {
-            let amount = cgmath::Quaternion::from_angle_y(cgmath::Rad(objects::ROTATION_SPEED));
-            let current = instance.rotation;
-        
-            instance.rotation = amount * current;
-        }
-
-        let instance_data = self.instances
-            .iter()
-            .map(objects::Instance::to_raw)
-            .collect::<Vec<_>>();
-        self.queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instance_data));
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -423,7 +407,14 @@ impl State {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),         
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
