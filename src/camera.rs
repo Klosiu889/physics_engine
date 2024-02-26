@@ -1,5 +1,6 @@
 #![allow(unused_imports)]
-use tracing::{info, warn, error}; 
+use cgmath::SquareMatrix;
+use tracing::{error, info, warn};
 use winit::{
     event::*,
     window::{Window, WindowBuilder},
@@ -48,26 +49,28 @@ impl Camera {
         let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
         let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
 
-        return OPENGL_TO_WGPU_MATRIX * proj * view;
+        OPENGL_TO_WGPU_MATRIX * proj * view
     }
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
+    view_position: [f32; 4],
     view_proj: [[f32; 4]; 4],
 }
 
 impl CameraUniform {
     pub fn new() -> Self {
-        use cgmath::SquareMatrix;
         Self {
+            view_position: [0.0; 4],
             view_proj: cgmath::Matrix4::identity().into(),
         }
     }
 
     pub fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_proj = camera.build_view_projection_matrix().into();
+        self.view_position = camera.eye.to_homogeneous().into();
+        self.view_proj = (OPENGL_TO_WGPU_MATRIX * camera.build_view_projection_matrix()).into();
     }
 }
 
@@ -95,11 +98,12 @@ impl CameraController {
     pub fn process_events(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::KeyboardInput {
-                input: KeyboardInput {
-                    state,
-                    virtual_keycode: Some(keycode),
-                    ..
-                },
+                input:
+                    KeyboardInput {
+                        state,
+                        virtual_keycode: Some(keycode),
+                        ..
+                    },
                 ..
             } => {
                 let is_pressed = *state == ElementState::Pressed;
@@ -126,8 +130,8 @@ impl CameraController {
                     }
                     _ => false,
                 }
-            },
-            WindowEvent::MouseWheel {delta, ..} => {
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
                 let speed_up = match delta {
                     MouseScrollDelta::PixelDelta(pixels) => pixels.y * 0.005,
                     _ => 0.0,
@@ -165,4 +169,3 @@ impl CameraController {
         }
     }
 }
-
