@@ -13,7 +13,6 @@ use wasm_bindgen::prelude::*;
 
 mod camera;
 mod model;
-mod objects;
 mod resources;
 mod texture;
 
@@ -225,7 +224,7 @@ impl State {
                     };
 
                     let size = (x.abs() + z.abs()) as f32 / 10.0 + 0.2;
-                    model::Instance::new(Some(position), Some(rotation), 1.0)
+                    model::Instance::new(Some(position), Some(rotation), size)
                 })
             })
             .collect::<Vec<_>>();
