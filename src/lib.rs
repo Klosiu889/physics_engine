@@ -114,7 +114,6 @@ impl State {
     async fn new(window: Window) -> Self {
         let size = window.inner_size();
 
-        log::warn!("WGPU setup");
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
@@ -130,7 +129,7 @@ impl State {
             })
             .await
             .unwrap();
-        log::warn!("device and queue");
+
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -147,7 +146,6 @@ impl State {
             .await
             .unwrap();
 
-        log::warn!("Surface");
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
             .formats
@@ -263,7 +261,6 @@ impl State {
             label: Some("camera_bind_group"),
         });
 
-        log::warn!("Load model");
         let obj_model =
             resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
                 .await

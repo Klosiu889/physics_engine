@@ -1,7 +1,6 @@
 use std::io::{BufReader, Cursor};
 
 use cfg_if::cfg_if;
-use wgpu::util::DeviceExt;
 
 use crate::{model, texture};
 
@@ -133,24 +132,13 @@ pub async fn load_model(
                 })
                 .collect::<Vec<_>>();
 
-            let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("{:?} Vertex Buffer", file_name)),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("{:?} Index Buffer", file_name)),
-                contents: bytemuck::cast_slice(&m.mesh.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-
-            model::Mesh {
-                name: file_name.to_string(),
-                vertex_buffer,
-                index_buffer,
-                num_elements: m.mesh.indices.len() as u32,
-                material: m.mesh.material_id.unwrap_or(0),
-            }
+            model::Mesh::new(
+                file_name.to_string(),
+                &device,
+                &vertices,
+                &m.mesh.indices,
+                m.mesh.material_id.unwrap_or(0),
+            )
         })
         .collect::<Vec<_>>();
 

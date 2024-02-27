@@ -1,4 +1,5 @@
 use cgmath::Zero;
+use wgpu::util::DeviceExt;
 
 use crate::texture::Texture;
 use std::ops::Range;
@@ -126,11 +127,44 @@ pub struct Material {
 }
 
 pub struct Mesh {
-    pub name: String,
-    pub vertex_buffer: wgpu::Buffer,
-    pub index_buffer: wgpu::Buffer,
-    pub num_elements: u32,
-    pub material: usize,
+    name: String,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    num_elements: u32,
+    material: usize,
+}
+
+impl Mesh {
+    pub fn new<V>(
+        name: String,
+        device: &wgpu::Device,
+        vertices: &[V],
+        indices: &[u32],
+        material: usize,
+    ) -> Self
+    where
+        V: Vertex + bytemuck::Pod,
+    {
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{}_vertex_buffer", name)),
+            contents: bytemuck::cast_slice(vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{}_index_buffer", name)),
+            contents: bytemuck::cast_slice(indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        Self {
+            name,
+            vertex_buffer,
+            index_buffer,
+            num_elements: indices.len() as u32,
+            material,
+        }
+    }
 }
 
 pub trait DrawModel<'a> {
