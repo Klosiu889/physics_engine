@@ -13,10 +13,14 @@ use wasm_bindgen::prelude::*;
 
 mod camera;
 mod model;
+mod physics;
 mod resources;
 mod texture;
 
 use model::{DrawModel, Vertex};
+use physics::colisions::Collider;
+
+use crate::physics::Sphere;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -82,14 +86,89 @@ fn create_render_pipeline(
     })
 }
 
+struct RenderObject {
+    model: model::Model,
+    render_pipeline: wgpu::RenderPipeline,
+    instances: Vec<model::Instance>,
+    instance_buffer: wgpu::Buffer,
+}
+
+impl RenderObject {
+    pub fn new(
+        model: model::Model,
+        render_pipeline: wgpu::RenderPipeline,
+        instances: Vec<model::Instance>,
+        device: &wgpu::Device,
+    ) -> Self {
+        let instance_data = instances
+            .iter()
+            .map(model::Instance::to_raw)
+            .collect::<Vec<_>>();
+        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: bytemuck::cast_slice(&instance_data),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+
+        Self {
+            model,
+            render_pipeline,
+            instances,
+            instance_buffer,
+        }
+    }
+
+    pub fn update_physics(
+        &mut self,
+        position: Option<cgmath::Vector3<f32>>,
+        rotation: Option<cgmath::Quaternion<f32>>,
+    ) {
+        self.instances.iter_mut().for_each(|instance| {
+            instance.update(position, rotation);
+        });
+    }
+
+    pub fn get_instance_data(&self) -> Vec<model::InstanceRaw> {
+        self.instances.iter().map(model::Instance::to_raw).collect()
+    }
+
+    pub fn update_instance_buffer(&mut self, device: &wgpu::Device) {
+        let instance_data = self
+            .instances
+            .iter()
+            .map(model::Instance::to_raw)
+            .collect::<Vec<_>>();
+        self.instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Instance Buffer"),
+            contents: bytemuck::cast_slice(&instance_data),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+    }
+}
+
+struct Object<C: Collider> {
+    render_object: RenderObject,
+    physics_object: physics::PhysicalObject<C>,
+}
+
+impl<C: Collider> Object<C> {
+    pub fn update_physics(&mut self, dt: f32) {
+        self.physics_object.update(dt);
+        self.render_object.update_physics(
+            Some(self.physics_object.get_position()),
+            Some(self.physics_object.get_rotation()),
+        );
+    }
+}
+
 struct State {
     surface: wgpu::Surface,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
-    render_pipeline: wgpu::RenderPipeline,
-    obj_model: model::Model,
+
+    objects: Vec<Object<Sphere>>,
 
     camera: camera::Camera,
     projection: camera::Projection,
@@ -104,8 +183,6 @@ struct State {
     light_bind_group: wgpu::BindGroup,
     light_render_pipeline: wgpu::RenderPipeline,
 
-    instances: Vec<model::Instance>,
-    instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
     window: Window,
 }
@@ -202,41 +279,6 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        const NUM_INSTANCES_PER_ROW: u32 = 10;
-        const SPACE_BETWEEN: f32 = 3.0;
-        let instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-
-                    let position = cgmath::Vector3 { x, y: 0.0, z };
-
-                    let rotation = if position.is_zero() {
-                        cgmath::Quaternion::from_axis_angle(
-                            cgmath::Vector3::unit_z(),
-                            cgmath::Deg(0.0),
-                        )
-                    } else {
-                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                    };
-
-                    let size = (x.abs() + z.abs()) as f32 / 10.0 + 0.2;
-                    model::Instance::new(Some(position), Some(rotation), size)
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let instance_data = instances
-            .iter()
-            .map(model::Instance::to_raw)
-            .collect::<Vec<_>>();
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instance_data),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
         let camera_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[wgpu::BindGroupLayoutEntry {
@@ -260,11 +302,6 @@ impl State {
             }],
             label: Some("camera_bind_group"),
         });
-
-        let obj_model =
-            resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
-                .await
-                .unwrap();
 
         let depth_texture =
             texture::Texture::create_depth_texture(&device, &config, "depth_texture");
@@ -317,21 +354,6 @@ impl State {
                 push_constant_ranges: &[],
             });
 
-        let render_pipeline = {
-            let shader = wgpu::ShaderModuleDescriptor {
-                label: Some("Normal Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
-            };
-            create_render_pipeline(
-                &device,
-                &render_pipeline_layout,
-                config.format,
-                Some(texture::Texture::DEPTH_FORMAT),
-                &[model::ModelVertex::desc(), model::InstanceRaw::desc()],
-                shader,
-            )
-        };
-
         let light_render_pipeline = {
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Light Pipeline Layout"),
@@ -352,16 +374,96 @@ impl State {
             )
         };
 
+        let obj_model =
+            resources::load_model("sphere.obj", &device, &queue, &texture_bind_group_layout)
+                .await
+                .unwrap();
+
+        let collider = physics::Sphere::new(cgmath::Vector3::zero(), 1.0);
+
+        let render_pipeline = {
+            let shader = wgpu::ShaderModuleDescriptor {
+                label: Some("Normal Shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shader.wgsl").into()),
+            };
+            create_render_pipeline(
+                &device,
+                &render_pipeline_layout,
+                config.format,
+                Some(texture::Texture::DEPTH_FORMAT),
+                &[model::ModelVertex::desc(), model::InstanceRaw::desc()],
+                shader,
+            )
+        };
+
+        let pos = cgmath::Vector3::from((4.0, 0.0, 0.0));
+
+        let instance = model::Instance::new(Some(pos), None, 1.0);
+
+        let object = Object {
+            render_object: RenderObject::new(obj_model, render_pipeline, vec![instance], &device),
+            physics_object: physics::PhysicalObject::new(
+                pos,
+                cgmath::Quaternion::zero(),
+                Some(cgmath::Vector3::from((0.0, 0.0, 2.0))),
+                None,
+                1.0,
+                collider,
+            ),
+        };
+
+        let other_obj_model =
+            resources::load_model("sphere.obj", &device, &queue, &texture_bind_group_layout)
+                .await
+                .unwrap();
+
+        let other_collider = physics::Sphere::new(cgmath::Vector3::from((4.0, 0.0, 0.0)), 1.2);
+
+        let other_render_pipeline = {
+            let shader = wgpu::ShaderModuleDescriptor {
+                label: Some("Color Shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shader.wgsl").into()),
+            };
+            create_render_pipeline(
+                &device,
+                &render_pipeline_layout,
+                config.format,
+                Some(texture::Texture::DEPTH_FORMAT),
+                &[model::ModelVertex::desc(), model::InstanceRaw::desc()],
+                shader,
+            )
+        };
+
+        let other_instance = model::Instance::new(Some(cgmath::Vector3::zero()), None, 1.2);
+
+        let other_object = Object {
+            render_object: RenderObject::new(
+                other_obj_model,
+                other_render_pipeline,
+                vec![other_instance],
+                &device,
+            ),
+            physics_object: physics::PhysicalObject::new(
+                cgmath::Vector3::zero(),
+                cgmath::Quaternion::zero(),
+                None,
+                None,
+                1.0,
+                other_collider,
+            ),
+        };
+
+        let objects = vec![object, other_object];
+
         Self {
             surface,
             device,
             queue,
             config,
             size,
-            render_pipeline,
-            obj_model,
             camera,
             projection,
+            objects,
             camera_controller,
             camera_buffer,
             camera_bind_group,
@@ -371,8 +473,6 @@ impl State {
             light_buffer,
             light_bind_group,
             light_render_pipeline,
-            instances,
-            instance_buffer,
             depth_texture,
             window,
         }
@@ -430,6 +530,28 @@ impl State {
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
 
+        self.objects.iter_mut().for_each(|object| {
+            let force = -object.physics_object.get_position();
+            object.physics_object.apply_force(force);
+            object.update_physics(dt.as_secs_f32());
+            object.render_object.update_instance_buffer(&self.device);
+            self.queue.write_buffer(
+                &object.render_object.instance_buffer,
+                0,
+                bytemuck::cast_slice(&object.render_object.get_instance_data()),
+            );
+        });
+
+        self.objects.iter_mut().for_each(|object| {
+            object.physics_object.enable_collision();
+        });
+
+        self.objects.iter().for_each(|object| {
+            self.objects.iter().for_each(|other| {
+                object.physics_object.collide(&other.physics_object);
+            });
+        });
+
         let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();
         self.light_uniform.position = (cgmath::Quaternion::from_axis_angle(
             (0.0, 1.0, 0.0).into(),
@@ -483,22 +605,16 @@ impl State {
                 timestamp_writes: None,
             });
 
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            use crate::model::DrawLight;
-            render_pass.set_pipeline(&self.light_render_pipeline);
-            render_pass.draw_light_model(
-                &self.obj_model,
-                &self.camera_bind_group,
-                &self.light_bind_group,
-            );
-
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.draw_model_instanced(
-                &self.obj_model,
-                0..self.instances.len() as u32,
-                &self.camera_bind_group,
-                &self.light_bind_group,
-            );
+            self.objects.iter().for_each(|object| {
+                render_pass.set_vertex_buffer(1, object.render_object.instance_buffer.slice(..));
+                render_pass.set_pipeline(&object.render_object.render_pipeline);
+                render_pass.draw_model_instanced(
+                    &object.render_object.model,
+                    0..object.render_object.instances.len() as u32,
+                    &self.camera_bind_group,
+                    &self.light_bind_group,
+                );
+            });
         }
 
         self.queue.submit(iter::once(encoder.finish()));
@@ -513,7 +629,7 @@ pub async fn run() {
     cfg_if::cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
             std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-            console_log::init_with_level(log::Level::Warn).expect("Could't initialize logger");
+            console_log::init_with_level(log::Level::Warn).expect("Couldn't initialize logger");
         } else {
             env_logger::init();
         }

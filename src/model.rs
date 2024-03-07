@@ -32,6 +32,8 @@ impl Vertex for ModelVertex {
     }
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ModelVertexColored {
     pub position: [f32; 3],
     pub color: [f32; 3],
@@ -54,6 +56,7 @@ impl Vertex for ModelVertexColored {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct Instance {
     position: cgmath::Vector3<f32>,
     rotation: cgmath::Quaternion<f32>,
@@ -82,6 +85,15 @@ impl Instance {
             normal: cgmath::Matrix3::from(self.rotation).into(),
             size: self.size,
         }
+    }
+
+    pub fn update(
+        &mut self,
+        position: Option<cgmath::Vector3<f32>>,
+        rotation: Option<cgmath::Quaternion<f32>>,
+    ) {
+        self.position = position.unwrap_or(self.position);
+        self.rotation = rotation.unwrap_or(self.rotation);
     }
 }
 
