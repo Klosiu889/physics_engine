@@ -1,13 +1,13 @@
 use cgmath::{InnerSpace, Zero};
 
-use self::colisions::Collider;
+use self::colisions::{collision, Collider};
 pub mod colisions;
 
-pub trait Solver<C: Collider> {
-    fn solve(&self, object: &PhysicalObject<C>);
+pub trait Solver {
+    fn solve(&self, object: &PhysicalObject);
 }
 
-pub struct PhysicalObject<C: Collider> {
+pub struct PhysicalObject {
     position: cgmath::Vector3<f32>,
     rotation: cgmath::Quaternion<f32>,
     velocity: cgmath::Vector3<f32>,
@@ -15,17 +15,17 @@ pub struct PhysicalObject<C: Collider> {
     mass: f32,
     have_gravity: bool,
     have_collision: bool,
-    collider: C,
+    collider: Box<dyn Collider>,
 }
 
-impl<C: Collider> PhysicalObject<C> {
+impl PhysicalObject {
     pub fn new(
         position: cgmath::Vector3<f32>,
         rotation: cgmath::Quaternion<f32>,
         velocity: Option<cgmath::Vector3<f32>>,
         forces: Option<cgmath::Vector3<f32>>,
         mass: f32,
-        collider: C,
+        collider: Box<dyn Collider>,
     ) -> Self {
         PhysicalObject {
             position,
@@ -86,8 +86,8 @@ impl<C: Collider> PhysicalObject<C> {
         self.have_collision = false;
     }
 
-    pub fn collide<T: Collider>(&self, other: &PhysicalObject<T>) -> bool {
-        self.have_collision && other.have_collision && self.collider.collision(&other.collider)
+    pub fn collide(&self, other: &PhysicalObject) -> bool {
+        self.have_collision && other.have_collision && collision(&self.collider, &other.collider)
     }
 }
 
@@ -112,5 +112,30 @@ impl colisions::Collider for Sphere {
 
     fn furthest_point(&self, direction: cgmath::Vector3<f32>) -> cgmath::Vector3<f32> {
         self.center + direction.normalize_to(self.radius)
+    }
+}
+
+pub struct Cube {
+    center: cgmath::Vector3<f32>,
+    half_size: cgmath::Vector3<f32>,
+}
+
+impl Cube {
+    pub fn new(center: cgmath::Vector3<f32>, half_size: cgmath::Vector3<f32>) -> Self {
+        Cube { center, half_size }
+    }
+}
+
+impl colisions::Collider for Cube {
+    fn update(&mut self, position: cgmath::Vector3<f32>, _rotation: cgmath::Quaternion<f32>) {
+        self.center = position;
+    }
+
+    fn get_center(&self) -> cgmath::Vector3<f32> {
+        self.center
+    }
+
+    fn furthest_point(&self, direction: cgmath::Vector3<f32>) -> cgmath::Vector3<f32> {
+        self.center + direction.normalize_to(self.half_size.magnitude())
     }
 }

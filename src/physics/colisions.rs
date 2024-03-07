@@ -12,24 +12,17 @@ pub trait Collider {
     fn update(&mut self, position: cgmath::Vector3<f32>, rotation: cgmath::Quaternion<f32>);
     fn get_center(&self) -> cgmath::Vector3<f32>;
     fn furthest_point(&self, direction: cgmath::Vector3<f32>) -> cgmath::Vector3<f32>;
-    fn collision<S>(&self, other: &S) -> bool
-    where
-        Self: Sized,
-        S: Collider,
-    {
-        gjk_collision(self, other)
-    }
+}
+
+pub fn collision(collider1: &Box<dyn Collider>, collider2: &Box<dyn Collider>) -> bool {
+    gjk_collision(collider1, collider2)
 }
 
 fn same_direction(a: cgmath::Vector3<f32>, b: cgmath::Vector3<f32>) -> bool {
     a.dot(b) > 0.0
 }
 
-fn gjk_collision<S1, S2>(shape1: &S1, shape2: &S2) -> bool
-where
-    S1: Collider,
-    S2: Collider,
-{
+fn gjk_collision(shape1: &Box<dyn Collider>, shape2: &Box<dyn Collider>) -> bool {
     let mut simplex = Vec::new();
     let mut direction = shape2.get_center() - shape1.get_center();
     let sup = support(shape1, shape2, direction);
@@ -52,11 +45,11 @@ where
     false
 }
 
-fn support<S1, S2>(a: &S1, b: &S2, direction: cgmath::Vector3<f32>) -> cgmath::Vector3<f32>
-where
-    S1: Collider,
-    S2: Collider,
-{
+fn support(
+    a: &Box<dyn Collider>,
+    b: &Box<dyn Collider>,
+    direction: cgmath::Vector3<f32>,
+) -> cgmath::Vector3<f32> {
     a.furthest_point(direction) - b.furthest_point(-direction)
 }
 

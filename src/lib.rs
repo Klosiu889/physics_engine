@@ -18,9 +18,6 @@ mod resources;
 mod texture;
 
 use model::{DrawModel, Vertex};
-use physics::colisions::Collider;
-
-use crate::physics::Sphere;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -146,12 +143,12 @@ impl RenderObject {
     }
 }
 
-struct Object<C: Collider> {
+struct Object {
     render_object: RenderObject,
-    physics_object: physics::PhysicalObject<C>,
+    physics_object: physics::PhysicalObject,
 }
 
-impl<C: Collider> Object<C> {
+impl Object {
     pub fn update_physics(&mut self, dt: f32) {
         self.physics_object.update(dt);
         self.render_object.update_physics(
@@ -168,7 +165,7 @@ struct State {
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
 
-    objects: Vec<Object<Sphere>>,
+    objects: Vec<Object>,
 
     camera: camera::Camera,
     projection: camera::Projection,
@@ -379,7 +376,7 @@ impl State {
                 .await
                 .unwrap();
 
-        let collider = physics::Sphere::new(cgmath::Vector3::zero(), 1.0);
+        let collider = Box::new(physics::Sphere::new(cgmath::Vector3::zero(), 1.0));
 
         let render_pipeline = {
             let shader = wgpu::ShaderModuleDescriptor {
@@ -417,7 +414,10 @@ impl State {
                 .await
                 .unwrap();
 
-        let other_collider = physics::Sphere::new(cgmath::Vector3::from((4.0, 0.0, 0.0)), 1.2);
+        let other_collider = Box::new(physics::Sphere::new(
+            cgmath::Vector3::from((4.0, 0.0, 0.0)),
+            1.2,
+        ));
 
         let other_render_pipeline = {
             let shader = wgpu::ShaderModuleDescriptor {
@@ -548,7 +548,10 @@ impl State {
 
         self.objects.iter().for_each(|object| {
             self.objects.iter().for_each(|other| {
-                object.physics_object.collide(&other.physics_object);
+                let result = object.physics_object.collide(&other.physics_object);
+                if result {
+                    log::info!("Collision: {}", result);
+                }
             });
         });
 
