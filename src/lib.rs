@@ -1,6 +1,7 @@
 use std::iter;
 
 use cgmath::prelude::*;
+use physics::collisions::Collider;
 use wgpu::util::DeviceExt;
 use winit::{
     event::*,
@@ -115,13 +116,9 @@ impl RenderObject {
         }
     }
 
-    pub fn update_physics(
-        &mut self,
-        position: Option<cgmath::Vector3<f32>>,
-        rotation: Option<cgmath::Quaternion<f32>>,
-    ) {
+    pub fn update(&mut self, position: cgmath::Vector3<f32>, rotation: cgmath::Quaternion<f32>) {
         self.instances.iter_mut().for_each(|instance| {
-            instance.update(position, rotation);
+            instance.update(Some(position), Some(rotation));
         });
     }
 
@@ -151,9 +148,9 @@ struct Object {
 impl Object {
     pub fn update_physics(&mut self, dt: f32) {
         self.physics_object.update(dt);
-        self.render_object.update_physics(
-            Some(self.physics_object.get_position()),
-            Some(self.physics_object.get_rotation()),
+        self.render_object.update(
+            self.physics_object.get_position(),
+            self.physics_object.get_rotation(),
         );
     }
 }
@@ -372,11 +369,25 @@ impl State {
         };
 
         let obj_model =
-            resources::load_model("sphere.obj", &device, &queue, &texture_bind_group_layout)
+            resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
                 .await
                 .unwrap();
 
-        let collider = Box::new(physics::Sphere::new(cgmath::Vector3::zero(), 1.0));
+        let mut collider = Box::new(physics::ConvexPolyhedron::new(vec![
+            cgmath::Vector3::from([1.0, 1.0, 1.0]),
+            cgmath::Vector3::from([-1.0, 1.0, 1.0]),
+            cgmath::Vector3::from([-1.0, -1.0, 1.0]),
+            cgmath::Vector3::from([1.0, -1.0, 1.0]),
+            cgmath::Vector3::from([1.0, 1.0, -1.0]),
+            cgmath::Vector3::from([-1.0, 1.0, -1.0]),
+            cgmath::Vector3::from([-1.0, -1.0, -1.0]),
+            cgmath::Vector3::from([1.0, -1.0, -1.0]),
+        ]));
+
+        collider.update(
+            cgmath::Vector3::from([6.0, 0.0, 0.0]),
+            cgmath::Quaternion::zero(),
+        );
 
         let render_pipeline = {
             let shader = wgpu::ShaderModuleDescriptor {
@@ -393,7 +404,7 @@ impl State {
             )
         };
 
-        let pos = cgmath::Vector3::from((4.0, 1.0, 1.0));
+        let pos = cgmath::Vector3::from((6.0, 0.0, 0.0));
 
         let instance = model::Instance::new(Some(pos), None, 1.0);
 
@@ -401,7 +412,7 @@ impl State {
             render_object: RenderObject::new(obj_model, render_pipeline, vec![instance], &device),
             physics_object: physics::PhysicalObject::new(
                 pos,
-                cgmath::Quaternion::zero(),
+                cgmath::Quaternion::one(),
                 None,
                 None,
                 1.0,
@@ -451,7 +462,7 @@ impl State {
             ),
             physics_object: physics::PhysicalObject::new(
                 cgmath::Vector3::zero(),
-                cgmath::Quaternion::zero(),
+                cgmath::Quaternion::one(),
                 None,
                 None,
                 1.0,
@@ -536,7 +547,23 @@ impl State {
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
 
+        const ROTATION_SPEED: f32 = 2.0 * std::f32::consts::PI;
         self.objects.iter_mut().for_each(|object| {
+            let amount =
+                cgmath::Quaternion::from_angle_y(cgmath::Rad(ROTATION_SPEED) * dt.as_secs_f32())
+                    * cgmath::Quaternion::from_angle_x(
+                        cgmath::Rad(ROTATION_SPEED) * dt.as_secs_f32(),
+                    )
+                    * cgmath::Quaternion::from_angle_z(
+                        cgmath::Rad(ROTATION_SPEED) * dt.as_secs_f32(),
+                    );
+            let current = object.physics_object.get_rotation();
+            object.physics_object.update_rotation(amount * current);
+        });
+
+        self.objects.iter_mut().for_each(|object| {
+            let force = -object.physics_object.get_position();
+            object.physics_object.apply_force(force);
             object.update_physics(dt.as_secs_f32());
             object.render_object.update_instance_buffer(&self.device);
             self.queue.write_buffer(

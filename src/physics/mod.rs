@@ -1,7 +1,8 @@
+use std::fmt::Debug;
 use cgmath::{InnerSpace, SquareMatrix, Zero};
 
-use self::colisions::{collision, Collider};
-pub mod colisions;
+use self::collisions::{collision, Collider};
+pub mod collisions;
 pub mod solver;
 
 pub struct PhysicalObject {
@@ -48,6 +49,10 @@ impl PhysicalObject {
 
     pub fn get_rotation(&self) -> cgmath::Quaternion<f32> {
         self.rotation
+    }
+
+    pub fn update_rotation(&mut self, rotation: cgmath::Quaternion<f32>) {
+        self.rotation = rotation;
     }
 
     pub fn update(&mut self, dt: f32) {
@@ -150,18 +155,20 @@ impl Collider for ConvexPolyhedron {
     }
 
     fn furthest_point(&self, direction: cgmath::Vector3<f32>) -> cgmath::Vector3<f32> {
+        let direction_transformed =
+            (self.transform_matrix.invert().unwrap() * direction.extend(0.0)).truncate();
+
         let mut max_dot = -f32::INFINITY;
         let mut max_vertex = cgmath::Vector3::zero();
         for vertex in &self.vertices {
-            let vertex = (self.transform_matrix * vertex.extend(1.0)).truncate();
-            let dot = vertex.dot(direction);
+            let dot = vertex.dot(direction_transformed);
             if dot > max_dot {
                 max_dot = dot;
-                max_vertex = vertex
+                max_vertex = *vertex
             }
         }
 
-        max_vertex
+        (self.transform_matrix * max_vertex.extend(1.0)).truncate()
     }
 }
 

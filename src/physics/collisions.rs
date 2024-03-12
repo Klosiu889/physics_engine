@@ -34,6 +34,7 @@ fn gjk_collision(shape1: &Box<dyn Collider>, shape2: &Box<dyn Collider>) -> bool
     normalize_or_zero(&mut direction);
 
     for _ in 0..MAX_ITERATIONS {
+        normalize_or_zero(&mut direction);
         let sup = support(shape1, shape2, direction);
         if !same_direction(sup, direction) {
             return false;
@@ -157,15 +158,15 @@ fn do_tetrahedron(
     let acd = ac.cross(ad);
     let adb = ad.cross(ab);
 
-    if same_direction(abc, ao) {
+    if !same_direction(abc, ao) {
         *simplex = vec![a, b, c];
         return do_triangle(simplex, direction);
     }
-    if same_direction(acd, ao) {
+    if !same_direction(acd, ao) {
         *simplex = vec![a, c, d];
         return do_triangle(simplex, direction);
     }
-    if same_direction(adb, ao) {
+    if !same_direction(adb, ao) {
         *simplex = vec![a, d, b];
         return do_triangle(simplex, direction);
     }
