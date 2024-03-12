@@ -2,15 +2,12 @@ use cgmath::{InnerSpace, Zero};
 
 use self::colisions::{collision, Collider};
 pub mod colisions;
-
-pub trait Solver {
-    fn solve(&self, object: &PhysicalObject);
-}
+pub mod solver;
 
 pub struct PhysicalObject {
     position: cgmath::Vector3<f32>,
     rotation: cgmath::Quaternion<f32>,
-    velocity: cgmath::Vector3<f32>,
+    pub velocity: cgmath::Vector3<f32>,
     forces: cgmath::Vector3<f32>,
     mass: f32,
     have_gravity: bool,
@@ -98,14 +95,16 @@ pub struct Sphere {
 
 impl Sphere {
     pub fn new(center: cgmath::Vector3<f32>, radius: f32) -> Self {
-        Sphere { center, radius }
+        Self { center, radius }
     }
 }
 
-impl colisions::Collider for Sphere {
+impl Collider for Sphere {
     fn update(&mut self, position: cgmath::Vector3<f32>, _rotation: cgmath::Quaternion<f32>) {
         self.center = position;
+        // log::info!("Sphere updated to: {:?}", self.center);
     }
+
     fn get_center(&self) -> cgmath::Vector3<f32> {
         self.center
     }
@@ -115,20 +114,32 @@ impl colisions::Collider for Sphere {
     }
 }
 
-pub struct Cube {
+pub struct ConvexPolyhedron {
+    vertices: Vec<cgmath::Vector3<f32>>,
     center: cgmath::Vector3<f32>,
-    half_size: cgmath::Vector3<f32>,
+    transform_matrix: cgmath::Matrix4<f32>,
 }
 
-impl Cube {
-    pub fn new(center: cgmath::Vector3<f32>, half_size: cgmath::Vector3<f32>) -> Self {
-        Cube { center, half_size }
+impl ConvexPolyhedron {
+    pub fn new(vertices: Vec<cgmath::Vector3<f32>>) -> Self {
+        let center = vertices
+            .iter()
+            .fold(cgmath::Vector3::zero(), |acc, v| acc + *v)
+            / vertices.len() as f32;
+        let transform_matrix = cgmath::Matrix4::from_translation(center);
+        Self {
+            vertices,
+            center,
+            transform_matrix,
+        }
     }
 }
 
-impl colisions::Collider for Cube {
-    fn update(&mut self, position: cgmath::Vector3<f32>, _rotation: cgmath::Quaternion<f32>) {
+impl Collider for ConvexPolyhedron {
+    fn update(&mut self, position: cgmath::Vector3<f32>, rotation: cgmath::Quaternion<f32>) {
         self.center = position;
+        self.transform_matrix =
+            cgmath::Matrix4::from_translation(self.center) * cgmath::Matrix4::from(rotation);
     }
 
     fn get_center(&self) -> cgmath::Vector3<f32> {
@@ -136,6 +147,17 @@ impl colisions::Collider for Cube {
     }
 
     fn furthest_point(&self, direction: cgmath::Vector3<f32>) -> cgmath::Vector3<f32> {
-        self.center + direction.normalize_to(self.half_size.magnitude())
+        let mut max_dot = -f32::INFINITY;
+        let mut max_vertex = cgmath::Vector3::zero();
+        for vertex in &self.vertices {
+            let vertex = (self.transform_matrix * vertex.extend(1.0)).truncate();
+            let dot = vertex.dot(direction);
+            if dot > max_dot {
+                max_dot = dot;
+                max_vertex = vertex
+            }
+        }
+
+        max_vertex
     }
 }

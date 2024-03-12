@@ -25,10 +25,13 @@ fn same_direction(a: cgmath::Vector3<f32>, b: cgmath::Vector3<f32>) -> bool {
 fn gjk_collision(shape1: &Box<dyn Collider>, shape2: &Box<dyn Collider>) -> bool {
     let mut simplex = Vec::new();
     let mut direction = shape2.get_center() - shape1.get_center();
+    normalize_or_zero(&mut direction);
+
     let sup = support(shape1, shape2, direction);
 
     simplex.push(sup);
     direction = ORIGIN - sup;
+    normalize_or_zero(&mut direction);
 
     for _ in 0..MAX_ITERATIONS {
         let sup = support(shape1, shape2, direction);
@@ -42,7 +45,14 @@ fn gjk_collision(shape1: &Box<dyn Collider>, shape2: &Box<dyn Collider>) -> bool
             return true;
         }
     }
+
     false
+}
+
+fn normalize_or_zero(v: &mut cgmath::Vector3<f32>) {
+    if !v.is_zero() {
+        *v = v.normalize()
+    }
 }
 
 fn support(
@@ -66,6 +76,8 @@ fn next_simplex(
 }
 
 fn do_line(simplex: &mut Vec<cgmath::Vector3<f32>>, direction: &mut cgmath::Vector3<f32>) -> bool {
+    normalize_or_zero(direction);
+
     let a = simplex[0];
     let b = simplex[1];
 
@@ -75,17 +87,19 @@ fn do_line(simplex: &mut Vec<cgmath::Vector3<f32>>, direction: &mut cgmath::Vect
     if same_direction(ab, ao) {
         *direction = ab.cross(ao).cross(ab);
     } else {
-        simplex.remove(1);
+        *simplex = vec![a];
         *direction = ao;
     }
 
-    *direction == cgmath::Vector3::zero()
+    direction.is_zero()
 }
 
 fn do_triangle(
     simplex: &mut Vec<cgmath::Vector3<f32>>,
     direction: &mut cgmath::Vector3<f32>,
 ) -> bool {
+    normalize_or_zero(direction);
+
     let a = simplex[0];
     let b = simplex[1];
     let c = simplex[2];
@@ -98,33 +112,37 @@ fn do_triangle(
 
     if same_direction(abc.cross(ac), ao) {
         if same_direction(ac, ao) {
-            simplex.remove(1);
+            *simplex = vec![a, c];
             *direction = ac.cross(ao).cross(ac);
         } else {
-            simplex.remove(2);
+            *simplex = vec![a, b];
             return do_line(simplex, direction);
         }
     } else {
         if same_direction(ab.cross(abc), ao) {
-            simplex.remove(2);
+            *simplex = vec![a, b];
             return do_line(simplex, direction);
+        }
+        if abc.dot(ao) == 0.0 {
+            return true;
         }
         if same_direction(abc, ao) {
             *direction = abc;
         } else {
-            simplex.remove(1);
-            simplex.push(b);
+            *simplex = vec![a, c, b];
             *direction = -abc;
         }
     }
 
-    *direction == cgmath::Vector3::zero()
+    false
 }
 
 fn do_tetrahedron(
     simplex: &mut Vec<cgmath::Vector3<f32>>,
     direction: &mut cgmath::Vector3<f32>,
 ) -> bool {
+    normalize_or_zero(direction);
+
     let a = simplex[0];
     let b = simplex[1];
     let c = simplex[2];
@@ -152,5 +170,5 @@ fn do_tetrahedron(
         return do_triangle(simplex, direction);
     }
 
-    false
+    true
 }

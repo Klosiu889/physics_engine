@@ -393,7 +393,7 @@ impl State {
             )
         };
 
-        let pos = cgmath::Vector3::from((4.0, 0.0, 0.0));
+        let pos = cgmath::Vector3::from((4.0, 1.0, 1.0));
 
         let instance = model::Instance::new(Some(pos), None, 1.0);
 
@@ -402,7 +402,7 @@ impl State {
             physics_object: physics::PhysicalObject::new(
                 pos,
                 cgmath::Quaternion::zero(),
-                Some(cgmath::Vector3::from((0.0, 0.0, 2.0))),
+                None,
                 None,
                 1.0,
                 collider,
@@ -410,14 +410,20 @@ impl State {
         };
 
         let other_obj_model =
-            resources::load_model("sphere.obj", &device, &queue, &texture_bind_group_layout)
+            resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
                 .await
                 .unwrap();
 
-        let other_collider = Box::new(physics::Sphere::new(
-            cgmath::Vector3::from((4.0, 0.0, 0.0)),
-            1.2,
-        ));
+        let other_collider = Box::new(physics::ConvexPolyhedron::new(vec![
+            cgmath::Vector3::from([1.0, 1.0, 1.0]),
+            cgmath::Vector3::from([-1.0, 1.0, 1.0]),
+            cgmath::Vector3::from([-1.0, -1.0, 1.0]),
+            cgmath::Vector3::from([1.0, -1.0, 1.0]),
+            cgmath::Vector3::from([1.0, 1.0, -1.0]),
+            cgmath::Vector3::from([-1.0, 1.0, -1.0]),
+            cgmath::Vector3::from([-1.0, -1.0, -1.0]),
+            cgmath::Vector3::from([1.0, -1.0, -1.0]),
+        ]));
 
         let other_render_pipeline = {
             let shader = wgpu::ShaderModuleDescriptor {
@@ -434,7 +440,7 @@ impl State {
             )
         };
 
-        let other_instance = model::Instance::new(Some(cgmath::Vector3::zero()), None, 1.2);
+        let other_instance = model::Instance::new(Some(cgmath::Vector3::zero()), None, 1.0);
 
         let other_object = Object {
             render_object: RenderObject::new(
@@ -531,8 +537,6 @@ impl State {
         );
 
         self.objects.iter_mut().for_each(|object| {
-            let force = -object.physics_object.get_position();
-            object.physics_object.apply_force(force);
             object.update_physics(dt.as_secs_f32());
             object.render_object.update_instance_buffer(&self.device);
             self.queue.write_buffer(
@@ -546,14 +550,13 @@ impl State {
             object.physics_object.enable_collision();
         });
 
-        self.objects.iter().for_each(|object| {
-            self.objects.iter().for_each(|other| {
-                let result = object.physics_object.collide(&other.physics_object);
-                if result {
-                    log::info!("Collision: {}", result);
-                }
-            });
-        });
+        for i in 0..self.objects.len() {
+            for j in i + 1..self.objects.len() {
+                self.objects[i]
+                    .physics_object
+                    .collide(&self.objects[j].physics_object);
+            }
+        }
 
         let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();
         self.light_uniform.position = (cgmath::Quaternion::from_axis_angle(
