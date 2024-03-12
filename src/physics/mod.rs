@@ -1,4 +1,4 @@
-use cgmath::{InnerSpace, Zero};
+use cgmath::{InnerSpace, SquareMatrix, Zero};
 
 use self::colisions::{collision, Collider};
 pub mod colisions;
@@ -102,7 +102,6 @@ impl Sphere {
 impl Collider for Sphere {
     fn update(&mut self, position: cgmath::Vector3<f32>, _rotation: cgmath::Quaternion<f32>) {
         self.center = position;
-        // log::info!("Sphere updated to: {:?}", self.center);
     }
 
     fn get_center(&self) -> cgmath::Vector3<f32> {
@@ -126,6 +125,10 @@ impl ConvexPolyhedron {
             .iter()
             .fold(cgmath::Vector3::zero(), |acc, v| acc + *v)
             / vertices.len() as f32;
+        let vertices = vertices
+            .iter()
+            .map(|v| v - center)
+            .collect::<Vec<cgmath::Vector3<f32>>>();
         let transform_matrix = cgmath::Matrix4::from_translation(center);
         Self {
             vertices,
@@ -159,5 +162,75 @@ impl Collider for ConvexPolyhedron {
         }
 
         max_vertex
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sphere_furthest_point() {
+        let sphere = Sphere::new(cgmath::Vector3::new(0.0, 0.0, 0.0), 1.0);
+        let direction = cgmath::Vector3::new(1.0, 0.0, 0.0);
+        let furthest_point = sphere.furthest_point(direction);
+        assert_eq!(furthest_point, cgmath::Vector3::new(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn test_convex_polyhedron_furthest_point() {
+        let vertices = vec![
+            cgmath::Vector3::new(0.0, 0.0, 0.0),
+            cgmath::Vector3::new(1.0, 0.0, 0.0),
+            cgmath::Vector3::new(0.0, 1.0, 0.0),
+            cgmath::Vector3::new(0.0, 0.0, 1.0),
+        ];
+        let polyhedron = ConvexPolyhedron::new(vertices);
+        let direction = cgmath::Vector3::new(1.0, 0.0, 0.0);
+        let furthest_point = polyhedron.furthest_point(direction);
+        assert_eq!(furthest_point, cgmath::Vector3::new(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn test_sphere_collision() {
+        let sphere1: Box<dyn Collider> =
+            Box::new(Sphere::new(cgmath::Vector3::new(0.0, 0.0, 0.0), 1.0));
+        let sphere2: Box<dyn Collider> =
+            Box::new(Sphere::new(cgmath::Vector3::new(2.0, 0.0, 0.0), 1.0));
+        assert_eq!(
+            collision(&sphere1, &sphere2),
+            false,
+            "Spheres too far apart"
+        );
+
+        let sphere1: Box<dyn Collider> =
+            Box::new(Sphere::new(cgmath::Vector3::new(0.0, 0.0, 0.0), 1.0));
+        let sphere2: Box<dyn Collider> =
+            Box::new(Sphere::new(cgmath::Vector3::new(1.0, 0.0, 0.0), 1.0));
+        assert_eq!(
+            collision(&sphere1, &sphere2),
+            true,
+            "Spheres collide on one point"
+        );
+
+        let sphere1: Box<dyn Collider> =
+            Box::new(Sphere::new(cgmath::Vector3::new(0.0, 0.0, 0.0), 1.0));
+        let sphere2: Box<dyn Collider> =
+            Box::new(Sphere::new(cgmath::Vector3::new(1.0, 0.0, 0.0), 2.0));
+        assert_eq!(
+            collision(&sphere1, &sphere2),
+            true,
+            "Spheres collide on more than one point"
+        );
+
+        let sphere1: Box<dyn Collider> =
+            Box::new(Sphere::new(cgmath::Vector3::new(0.0, 0.0, 0.0), 1.0));
+        let sphere2: Box<dyn Collider> =
+            Box::new(Sphere::new(cgmath::Vector3::new(1.0, 0.0, 0.0), 3.0));
+        assert_eq!(
+            collision(&sphere1, &sphere2),
+            true,
+            "Spheres inside each other"
+        );
     }
 }
