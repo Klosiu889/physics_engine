@@ -1,9 +1,7 @@
-use std::fmt::Debug;
 use cgmath::{InnerSpace, SquareMatrix, Zero};
 
 use self::collisions::{collision, Collider};
 pub mod collisions;
-pub mod solver;
 
 pub struct PhysicalObject {
     position: cgmath::Vector3<f32>,
